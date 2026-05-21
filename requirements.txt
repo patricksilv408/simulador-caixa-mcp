@@ -1,0 +1,4 @@
+mcp[cli]
+playwright
+python-dotenv
+uvicorn

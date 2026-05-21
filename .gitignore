@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Ambiente
+.env
+.DS_Store
+
+# Node
+node_modules/
+package-lock.json
+package.json
+
+# Exploração / diagnóstico
+explore_full.py
+explore_simulator.py
+simulator_structure.json
+
+# Playwright
+test-results/
+playwright-report/
