@@ -235,17 +235,23 @@ async def simular(params: SimulacaoParams) -> dict:
     else:
         cpf_fmt = params.cpf
 
-    # Detecta se Tor está disponível (VPS) e roteia por ele para evitar bloqueio de IP de datacenter
+    # Roteia pelo proxy SOCKS5 do Android (via Tailscale) para evitar bloqueio de IP de datacenter.
+    # O Android (IP móvel/residencial) é aceito pela Caixa; IPs de VPS recebem 403.
+    # Se o proxy não estiver disponível (ambiente local), roda sem proxy.
     import socket as _socket
-    _tor_available = False
+    import os as _os
+
+    _proxy_host = _os.getenv("SOCKS5_PROXY_HOST", "100.82.36.81")
+    _proxy_port = int(_os.getenv("SOCKS5_PROXY_PORT", "1080"))
+    _proxy_available = False
     try:
-        _s = _socket.create_connection(("127.0.0.1", 9050), timeout=2)
+        _s = _socket.create_connection((_proxy_host, _proxy_port), timeout=3)
         _s.close()
-        _tor_available = True
+        _proxy_available = True
     except Exception:
         pass
 
-    _proxy = {"server": "socks5://127.0.0.1:9050"} if _tor_available else None
+    _proxy = {"server": f"socks5://{_proxy_host}:{_proxy_port}"} if _proxy_available else None
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
