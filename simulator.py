@@ -21,7 +21,7 @@ BROWSER_ARGS = [
     "--window-size=1280,900",
 ]
 
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 # Script de anti-detecção injetado em todas as páginas
 STEALTH_SCRIPT = """
@@ -29,7 +29,14 @@ STEALTH_SCRIPT = """
     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
     Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
     Object.defineProperty(navigator, 'platform', {get: () => 'MacIntel'});
-    window.chrome = {runtime: {}};
+    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+    Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+    window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}, app: {}};
+    window.Notification = {permission: 'default'};
+    delete window.__playwright;
+    delete window.__pw_manual;
 """
 
 
@@ -268,7 +275,12 @@ async def simular(params: SimulacaoParams) -> dict:
 
             # Clica via JS para evitar timeout em VPS headless (div, não button)
             await page.evaluate("(function(){var el=document.getElementById('btn_next1');if(el)el.click();})()")
-            await page.wait_for_timeout(3000)
+
+            # Espera ativa: aguarda o campo CPF aparecer (confirma que o passo2 carregou)
+            try:
+                await page.wait_for_selector("#nuCpfCnpjInteressado", state="visible", timeout=15000)
+            except Exception:
+                await page.wait_for_timeout(4000)
 
             # ── Etapa 2 ────────────────────────────────────────────────
             if cpf_fmt:
@@ -324,7 +336,20 @@ async def simular(params: SimulacaoParams) -> dict:
 
             # Clica via JS para evitar timeout em VPS headless (div, não button)
             await page.evaluate("(function(){var el=document.getElementById('btn_next2');if(el)el.click();})()")
-            await page.wait_for_timeout(5000)
+
+            # Espera ativa: aguarda o passo3 ficar visível (confirma envio do formulário)
+            try:
+                await page.wait_for_function(
+                    """() => {
+                        var p3 = document.getElementById('passo3');
+                        if (!p3) return false;
+                        var style = window.getComputedStyle(p3);
+                        return style.display !== 'none' && p3.innerText.trim().length > 10;
+                    }""",
+                    timeout=20000,
+                )
+            except Exception:
+                await page.wait_for_timeout(6000)
 
             await _dismiss_modal(page)
 
@@ -339,9 +364,17 @@ async def simular(params: SimulacaoParams) -> dict:
             """)
 
             if not lista_produtos:
+                # Salva screenshot de debug para diagnosticar o que a Caixa retornou
+                import os, time as _time
+                debug_path = f"/tmp/caixa_debug_{int(_time.time())}.png"
+                try:
+                    await page.screenshot(path=debug_path, full_page=True)
+                except Exception:
+                    debug_path = ""
                 return {
                     "produtos": [],
                     "texto_completo": passo3_text,
+                    "debug_screenshot": debug_path,
                     "erro": None,
                 }
 
