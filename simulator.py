@@ -21,7 +21,7 @@ BROWSER_ARGS = [
     "--window-size=1280,900",
 ]
 
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 # Script de anti-detecção injetado em todas as páginas
 STEALTH_SCRIPT = """
@@ -29,7 +29,14 @@ STEALTH_SCRIPT = """
     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
     Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
     Object.defineProperty(navigator, 'platform', {get: () => 'MacIntel'});
-    window.chrome = {runtime: {}};
+    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+    Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+    window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}, app: {}};
+    window.Notification = {permission: 'default'};
+    delete window.__playwright;
+    delete window.__pw_manual;
 """
 
 
@@ -192,7 +199,20 @@ async def _extract_produto_details(page: Page, produto_id: str, tipo: str,
     """Chama simular() para o produto e extrai dados do passo4."""
     nome_escaped = nome.replace("'", "\\'")
     await page.evaluate(f"simuladorInternet.simular({produto_id}, {tipo}, '{nome_escaped}')")
-    await page.wait_for_timeout(4000)
+
+    # Espera ativa: aguarda passo4 ficar visível e com conteúdo (até 15s via proxy Android)
+    try:
+        await page.wait_for_function(
+            """() => {
+                var p4 = document.getElementById('passo4');
+                if (!p4) return false;
+                var style = window.getComputedStyle(p4);
+                return style.display !== 'none' && p4.innerText.trim().length > 100;
+            }""",
+            timeout=15000,
+        )
+    except Exception:
+        await page.wait_for_timeout(3000)
 
     passo4_data = await page.evaluate("""
         (function() {
@@ -228,8 +248,30 @@ async def simular(params: SimulacaoParams) -> dict:
     else:
         cpf_fmt = params.cpf
 
+    # Roteia pelo proxy SOCKS5 do Android (via Tailscale) para evitar bloqueio de IP de datacenter.
+    # O Android (IP móvel/residencial) é aceito pela Caixa; IPs de VPS recebem 403.
+    # Se o proxy não estiver disponível (ambiente local), roda sem proxy.
+    import socket as _socket
+    import os as _os
+
+    _proxy_host = _os.getenv("SOCKS5_PROXY_HOST", "100.82.36.81")
+    _proxy_port = int(_os.getenv("SOCKS5_PROXY_PORT", "1080"))
+    _proxy_available = False
+    try:
+        _s = _socket.create_connection((_proxy_host, _proxy_port), timeout=3)
+        _s.close()
+        _proxy_available = True
+    except Exception:
+        pass
+
+    _proxy = {"server": f"socks5://{_proxy_host}:{_proxy_port}"} if _proxy_available else None
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=BROWSER_ARGS,
+            proxy=_proxy,
+        )
         context = await browser.new_context(
             user_agent=UA,
             viewport={"width": 1280, "height": 900},
@@ -244,9 +286,10 @@ async def simular(params: SimulacaoParams) -> dict:
 
             # ── Etapa 1 ────────────────────────────────────────────────
             radio_id = "pessoaF" if params.tipo_pessoa == "F" else "pessoaJ"
-            await page.evaluate(f"document.getElementById('{radio_id}').checked = true")
+            await page.evaluate(f"(function(){{var el=document.getElementById('{radio_id}');if(el)el.checked=true;}})()")
 
             await _set_select(page, "tipoImovel", tipo_value)
+            await page.wait_for_timeout(1500)  # aguarda AJAX da categoria carregar
             await _set_select(page, "categoriaImovel", categoria_value)
 
             # valorImovel tem máscara de moeda: valor × 100 para acertar os decimais
@@ -256,16 +299,23 @@ async def simular(params: SimulacaoParams) -> dict:
                 await _set_currency(page, "valorReforma", params.valor_imovel)
 
             await _set_select(page, "uf", params.uf.upper())
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)  # aguarda AJAX das cidades
             await _set_select(page, "cidade", cidade_id)
+            await page.wait_for_timeout(500)
 
             if params.possui_imovel_na_cidade:
-                await page.evaluate("document.getElementById('imovelCidade').checked = true")
+                await page.evaluate("(function(){var el=document.getElementById('imovelCidade');if(el)el.checked=true;})()")
             if params.portabilidade:
-                await page.evaluate("document.getElementById('icPortabilidadeCreditoImobiliario').checked = true")
+                await page.evaluate("(function(){var el=document.getElementById('icPortabilidadeCreditoImobiliario');if(el)el.checked=true;})()")
 
-            await page.click("#btn_next1")
-            await page.wait_for_timeout(2000)
+            # Clica via JS para evitar timeout em VPS headless (div, não button)
+            await page.evaluate("(function(){var el=document.getElementById('btn_next1');if(el)el.click();})()")
+
+            # Espera ativa: aguarda o campo CPF aparecer (confirma que o passo2 carregou)
+            try:
+                await page.wait_for_selector("#nuCpfCnpjInteressado", state="visible", timeout=15000)
+            except Exception:
+                await page.wait_for_timeout(4000)
 
             # ── Etapa 2 ────────────────────────────────────────────────
             if cpf_fmt:
@@ -303,11 +353,11 @@ async def simular(params: SimulacaoParams) -> dict:
             if params.ja_beneficiado_fgts:
                 await _set_checkbox(page, "beneficiadoFGTS", True)
                 if params.data_beneficio_fgts:
-                    await page.evaluate(f"document.getElementById('dataBeneficioFGTS').value = '{params.data_beneficio_fgts}'")
+                    await page.evaluate(f"(function(){{var el=document.getElementById('dataBeneficioFGTS');if(el)el.value='{params.data_beneficio_fgts}';}})() ")
             if params.possui_convenio and params.cnpj_convenio:
                 await _set_checkbox(page, "possuiConvenio", True)
                 await page.wait_for_timeout(500)
-                await page.evaluate(f"document.getElementById('cnpjConvenio').value = '{params.cnpj_convenio}'")
+                await page.evaluate(f"(function(){{var el=document.getElementById('cnpjConvenio');if(el)el.value='{params.cnpj_convenio}';}})() ")
             if params.fator_social:
                 await _set_checkbox(page, "icFatorSocial", True)
             if params.mais_de_um_comprador:
@@ -319,8 +369,22 @@ async def simular(params: SimulacaoParams) -> dict:
             if params.conta_salario_caixa:
                 await _set_checkbox(page, "icContaSalarioCAIXA", True)
 
-            await page.click("#btn_next2")
-            await page.wait_for_timeout(4000)
+            # Clica via JS para evitar timeout em VPS headless (div, não button)
+            await page.evaluate("(function(){var el=document.getElementById('btn_next2');if(el)el.click();})()")
+
+            # Espera ativa: aguarda o passo3 ficar visível (confirma envio do formulário)
+            try:
+                await page.wait_for_function(
+                    """() => {
+                        var p3 = document.getElementById('passo3');
+                        if (!p3) return false;
+                        var style = window.getComputedStyle(p3);
+                        return style.display !== 'none' && p3.innerText.trim().length > 10;
+                    }""",
+                    timeout=20000,
+                )
+            except Exception:
+                await page.wait_for_timeout(6000)
 
             await _dismiss_modal(page)
 
@@ -335,9 +399,17 @@ async def simular(params: SimulacaoParams) -> dict:
             """)
 
             if not lista_produtos:
+                # Salva screenshot de debug para diagnosticar o que a Caixa retornou
+                import os, time as _time
+                debug_path = f"/tmp/caixa_debug_{int(_time.time())}.png"
+                try:
+                    await page.screenshot(path=debug_path, full_page=True)
+                except Exception:
+                    debug_path = ""
                 return {
                     "produtos": [],
                     "texto_completo": passo3_text,
+                    "debug_screenshot": debug_path,
                     "erro": None,
                 }
 

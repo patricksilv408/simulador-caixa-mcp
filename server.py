@@ -18,8 +18,13 @@ load_dotenv()
 from models import SimulacaoParams, CATEGORIAS_POR_TIPO, UFS
 from simulator import simular, listar_cidades_uf
 
+_host = os.getenv("MCP_HOST", "0.0.0.0")
+_port = int(os.getenv("MCP_PORT", "8000"))
+
 mcp = FastMCP(
     "simulador-caixa",
+    host=_host,
+    port=_port,
     instructions=(
         "Servidor MCP para simulação de financiamento imobiliário na Caixa Econômica Federal. "
         "Use simular_financiamento para obter parcelas, taxas e condições de financiamento. "
