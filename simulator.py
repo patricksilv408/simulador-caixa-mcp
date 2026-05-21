@@ -244,7 +244,7 @@ async def simular(params: SimulacaoParams) -> dict:
 
             # ── Etapa 1 ────────────────────────────────────────────────
             radio_id = "pessoaF" if params.tipo_pessoa == "F" else "pessoaJ"
-            await page.evaluate(f"document.getElementById('{radio_id}').checked = true")
+            await page.evaluate(f"(function(){{var el=document.getElementById('{radio_id}');if(el)el.checked=true;}})()")
 
             await _set_select(page, "tipoImovel", tipo_value)
             await _set_select(page, "categoriaImovel", categoria_value)
@@ -260,9 +260,9 @@ async def simular(params: SimulacaoParams) -> dict:
             await _set_select(page, "cidade", cidade_id)
 
             if params.possui_imovel_na_cidade:
-                await page.evaluate("document.getElementById('imovelCidade').checked = true")
+                await page.evaluate("(function(){var el=document.getElementById('imovelCidade');if(el)el.checked=true;})()")
             if params.portabilidade:
-                await page.evaluate("document.getElementById('icPortabilidadeCreditoImobiliario').checked = true")
+                await page.evaluate("(function(){var el=document.getElementById('icPortabilidadeCreditoImobiliario');if(el)el.checked=true;})()")
 
             await page.click("#btn_next1")
             await page.wait_for_timeout(2000)
@@ -303,7 +303,7 @@ async def simular(params: SimulacaoParams) -> dict:
             if params.ja_beneficiado_fgts:
                 await _set_checkbox(page, "beneficiadoFGTS", True)
                 if params.data_beneficio_fgts:
-                    await page.evaluate(f"document.getElementById('dataBeneficioFGTS').value = '{params.data_beneficio_fgts}'")
+                    await page.evaluate(f"(function(){{var el=document.getElementById('dataBeneficioFGTS');if(el)el.value='{params.data_beneficio_fgts}';}})() ")
             if params.possui_convenio and params.cnpj_convenio:
                 await _set_checkbox(page, "possuiConvenio", True)
                 await page.wait_for_timeout(500)
