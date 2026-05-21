@@ -247,6 +247,7 @@ async def simular(params: SimulacaoParams) -> dict:
             await page.evaluate(f"(function(){{var el=document.getElementById('{radio_id}');if(el)el.checked=true;}})()")
 
             await _set_select(page, "tipoImovel", tipo_value)
+            await page.wait_for_timeout(1500)  # aguarda AJAX da categoria carregar
             await _set_select(page, "categoriaImovel", categoria_value)
 
             # valorImovel tem máscara de moeda: valor × 100 para acertar os decimais
@@ -256,16 +257,18 @@ async def simular(params: SimulacaoParams) -> dict:
                 await _set_currency(page, "valorReforma", params.valor_imovel)
 
             await _set_select(page, "uf", params.uf.upper())
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)  # aguarda AJAX das cidades
             await _set_select(page, "cidade", cidade_id)
+            await page.wait_for_timeout(500)
 
             if params.possui_imovel_na_cidade:
                 await page.evaluate("(function(){var el=document.getElementById('imovelCidade');if(el)el.checked=true;})()")
             if params.portabilidade:
                 await page.evaluate("(function(){var el=document.getElementById('icPortabilidadeCreditoImobiliario');if(el)el.checked=true;})()")
 
-            await page.click("#btn_next1")
-            await page.wait_for_timeout(2000)
+            # Clica via JS para evitar timeout em VPS headless (div, não button)
+            await page.evaluate("(function(){var el=document.getElementById('btn_next1');if(el)el.click();})()")
+            await page.wait_for_timeout(3000)
 
             # ── Etapa 2 ────────────────────────────────────────────────
             if cpf_fmt:
@@ -307,7 +310,7 @@ async def simular(params: SimulacaoParams) -> dict:
             if params.possui_convenio and params.cnpj_convenio:
                 await _set_checkbox(page, "possuiConvenio", True)
                 await page.wait_for_timeout(500)
-                await page.evaluate(f"document.getElementById('cnpjConvenio').value = '{params.cnpj_convenio}'")
+                await page.evaluate(f"(function(){{var el=document.getElementById('cnpjConvenio');if(el)el.value='{params.cnpj_convenio}';}})() ")
             if params.fator_social:
                 await _set_checkbox(page, "icFatorSocial", True)
             if params.mais_de_um_comprador:
@@ -319,8 +322,9 @@ async def simular(params: SimulacaoParams) -> dict:
             if params.conta_salario_caixa:
                 await _set_checkbox(page, "icContaSalarioCAIXA", True)
 
-            await page.click("#btn_next2")
-            await page.wait_for_timeout(4000)
+            # Clica via JS para evitar timeout em VPS headless (div, não button)
+            await page.evaluate("(function(){var el=document.getElementById('btn_next2');if(el)el.click();})()")
+            await page.wait_for_timeout(5000)
 
             await _dismiss_modal(page)
 
