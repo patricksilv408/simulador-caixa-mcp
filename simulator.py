@@ -135,9 +135,42 @@ async def _get_produtos_passo3(page: Page) -> list[dict]:
     """)
 
 
+_ERROS_PASSO4 = [
+    "RENDA INSUFICIENTE",
+    "OPERAÇÃO NÃO ENQUADRADA",
+    "OPERACAO NAO ENQUADRADA",
+    "NÃO HÁ PRODUTO",
+    "NAO HA PRODUTO",
+    "PRAZO INVÁLIDO",
+    "PRAZO INVALIDO",
+    "CPF INVÁLIDO",
+    "CPF INVALIDO",
+    "DADOS INVÁLIDOS",
+    "DADOS INVALIDOS",
+]
+
+
 def _parse_passo4_text(text: str, nome_produto: str, descricao: str) -> Optional[Produto]:
-    """Extrai dados financeiros do texto do passo4."""
-    if not text or len(text) < 50:
+    """Extrai dados financeiros do texto do passo4.
+
+    Retorna Produto com aviso preenchido se a Caixa retornar mensagem de erro
+    (ex: RENDA INSUFICIENTE), ou None se o passo4 estiver vazio/ilegível.
+    """
+    if not text or len(text) < 10:
+        return None
+
+    text_upper = text.upper()
+
+    # Detecta mensagens de erro da Caixa e retorna produto com aviso (sem zeros enganosos)
+    for erro in _ERROS_PASSO4:
+        if erro in text_upper:
+            # Extrai a linha exata da mensagem de atenção para o aviso
+            aviso_match = re.search(r"ATEN[ÇC][AÃ]O[!.]?\s*(.+?)(?:\.|$)", text, re.IGNORECASE)
+            aviso_msg = aviso_match.group(0).strip() if aviso_match else erro
+            return Produto(modalidade=nome_produto, programa=descricao, aviso=aviso_msg)
+
+    # Sem dados financeiros mínimos, descarta (não retorna zeros enganosos)
+    if len(text) < 50:
         return None
 
     produto = Produto(modalidade=nome_produto, programa=descricao)
@@ -415,6 +448,7 @@ async def simular(params: SimulacaoParams) -> dict:
 
             # ── Passo 4: navegar por cada produto e extrair detalhes ───
             produtos_detalhados = []
+            avisos = []
             for prod in lista_produtos:
                 produto = await _extract_produto_details(
                     page,
@@ -424,10 +458,18 @@ async def simular(params: SimulacaoParams) -> dict:
                     prod["descricao"],
                 )
                 if produto:
-                    produtos_detalhados.append(vars(produto))
+                    if produto.aviso:
+                        # Produto com erro da Caixa — registra aviso, não adiciona à lista
+                        avisos.append({
+                            "modalidade": produto.modalidade,
+                            "aviso": produto.aviso,
+                        })
+                    else:
+                        produtos_detalhados.append(vars(produto))
 
             return {
                 "produtos": produtos_detalhados,
+                "avisos": avisos,
                 "texto_completo": passo3_text,
                 "erro": None,
             }

@@ -89,6 +89,7 @@ class Produto:
     seguro_dfi: float = 0.0
     comprometimento_renda: str = ""
     linha_credito: str = ""
+    aviso: str = ""          # Mensagem de erro/aviso da Caixa (ex: "RENDA INSUFICIENTE")
     detalhes_extras: dict = field(default_factory=dict)
 
 

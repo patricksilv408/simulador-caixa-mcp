@@ -140,10 +140,11 @@ async def simular_financiamento(
         }, ensure_ascii=False, indent=2)
 
     produtos = resultado.get("produtos", [])
+    avisos = resultado.get("avisos", [])
     texto = resultado.get("texto_completo", "")
 
     if not produtos:
-        return json.dumps({
+        resposta: dict = {
             "sucesso": False,
             "mensagem": "Nenhum produto encontrado para os dados informados.",
             "dica": (
@@ -153,9 +154,19 @@ async def simular_financiamento(
                 "e o imóvel até R$350.000."
             ),
             "texto_bruto": texto[:3000] if texto else "",
-        }, ensure_ascii=False, indent=2)
+        }
+        if avisos:
+            # Informa ao agente por que cada produto foi descartado pela Caixa
+            resposta["produtos_descartados"] = avisos
+            resposta["dica_renda"] = (
+                "A Caixa retornou mensagens de erro para os produtos acima. "
+                "Verifique se a renda é compatível com o valor do imóvel "
+                "(parcela não pode comprometer mais de 30% da renda). "
+                "Tente simular com um valor de imóvel menor."
+            )
+        return json.dumps(resposta, ensure_ascii=False, indent=2)
 
-    return json.dumps({
+    resposta = {
         "sucesso": True,
         "total_produtos": len(produtos),
         "produtos": produtos,
@@ -164,7 +175,12 @@ async def simular_financiamento(
             "Os valores são estimativas. Condições definitivas sujeitas a análise de crédito. "
             "Para contratar, visite uma agência Caixa ou Correspondente Caixa Aqui."
         ),
-    }, ensure_ascii=False, indent=2)
+    }
+    if avisos:
+        # Alguns produtos apareceram mas foram descartados por erro da Caixa
+        resposta["produtos_descartados"] = avisos
+
+    return json.dumps(resposta, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
