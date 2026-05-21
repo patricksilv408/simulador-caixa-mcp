@@ -235,8 +235,24 @@ async def simular(params: SimulacaoParams) -> dict:
     else:
         cpf_fmt = params.cpf
 
+    # Detecta se Tor está disponível (VPS) e roteia por ele para evitar bloqueio de IP de datacenter
+    import socket as _socket
+    _tor_available = False
+    try:
+        _s = _socket.create_connection(("127.0.0.1", 9050), timeout=2)
+        _s.close()
+        _tor_available = True
+    except Exception:
+        pass
+
+    _proxy = {"server": "socks5://127.0.0.1:9050"} if _tor_available else None
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=BROWSER_ARGS)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=BROWSER_ARGS,
+            proxy=_proxy,
+        )
         context = await browser.new_context(
             user_agent=UA,
             viewport={"width": 1280, "height": 900},
