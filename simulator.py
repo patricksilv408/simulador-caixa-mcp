@@ -199,7 +199,20 @@ async def _extract_produto_details(page: Page, produto_id: str, tipo: str,
     """Chama simular() para o produto e extrai dados do passo4."""
     nome_escaped = nome.replace("'", "\\'")
     await page.evaluate(f"simuladorInternet.simular({produto_id}, {tipo}, '{nome_escaped}')")
-    await page.wait_for_timeout(4000)
+
+    # Espera ativa: aguarda passo4 ficar visível e com conteúdo (até 15s via proxy Android)
+    try:
+        await page.wait_for_function(
+            """() => {
+                var p4 = document.getElementById('passo4');
+                if (!p4) return false;
+                var style = window.getComputedStyle(p4);
+                return style.display !== 'none' && p4.innerText.trim().length > 100;
+            }""",
+            timeout=15000,
+        )
+    except Exception:
+        await page.wait_for_timeout(3000)
 
     passo4_data = await page.evaluate("""
         (function() {
